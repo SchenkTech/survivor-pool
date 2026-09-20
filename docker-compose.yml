@@ -1,6 +1,6 @@
 services:
   survivor:
-    image: ghcr.io/OWNER/survivor-pool:latest   # or: build: .
+    image: ghcr.io/schenktech/survivor-pool:latest   # or: build: .
     restart: unless-stopped
     ports:
       - "8080:8080"
