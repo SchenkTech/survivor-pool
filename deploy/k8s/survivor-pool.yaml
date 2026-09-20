@@ -1,0 +1,83 @@
+# Single replica on purpose: SQLite on a ReadWriteOnce volume. Recreate (not
+# RollingUpdate) so two pods never hold the database at once.
+#
+#   kubectl create namespace survivor
+#   kubectl -n survivor create secret generic survivor-pool \
+#     --from-literal=GOOGLE_CLIENT_ID=... --from-literal=GOOGLE_CLIENT_SECRET=...
+#   kubectl -n survivor apply -f survivor-pool.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: survivor-pool
+data:
+  PUBLIC_URL: https://survivor.example.com
+  ADMIN_EMAILS: you@gmail.com
+  SYNC_INTERVAL_MINUTES: "15"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: survivor-pool-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: survivor-pool
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: { app: survivor-pool }
+  template:
+    metadata:
+      labels: { app: survivor-pool }
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: app
+          image: ghcr.io/OWNER/survivor-pool:latest
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - configMapRef: { name: survivor-pool }
+            - secretRef: { name: survivor-pool }
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet: { path: /api/health, port: http }
+          livenessProbe:
+            httpGet: { path: /api/health, port: http }
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 10m, memory: 64Mi }
+            limits: { memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: survivor-pool-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: survivor-pool
+spec:
+  selector: { app: survivor-pool }
+  ports:
+    - port: 80
+      targetPort: http
+      name: http
